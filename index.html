@@ -44,7 +44,6 @@
     const { useState, useEffect } = React;
 
     const DEMO_LEVEL_COUNT = 2;
-    const MAX_RETRIES = 3;
     const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
     const calculateResult = (a, b, op) => {
@@ -164,9 +163,10 @@
       const [elapsedTime, setElapsedTime] = useState(0);
       const [showConfetti, setShowConfetti] = useState(false);
       const [shake, setShake] = useState(false);
-      const [retriesLeft, setRetriesLeft] = useState(MAX_RETRIES);
       const [statusMessage, setStatusMessage] = useState('');
       const [bestScore, setBestScore] = useState(0);
+      const [playedLevels, setPlayedLevels] = useState({});
+      const [shareMessage, setShareMessage] = useState('');
 
       useEffect(() => {
         if (gameState === 'playing' && startTime) {
@@ -190,7 +190,13 @@
         return buildGeneratedLevel(levelNum);
       };
 
-      const startLevel = (levelNum, nextRetriesLeft = MAX_RETRIES) => {
+      const startLevel = (levelNum) => {
+        if (playedLevels[levelNum]) {
+          setStatusMessage(`Level ${levelNum} has already been played this refresh.`);
+          setGameState('menu');
+          return;
+        }
+
         const config = generateLevel(levelNum);
         setLevel(levelNum);
         setTargetNumber(config.target);
@@ -204,8 +210,9 @@
         setStartTime(Date.now());
         setElapsedTime(0);
         setShowConfetti(false);
-        setRetriesLeft(nextRetriesLeft);
-        setStatusMessage(`Level ${levelNum}: follow the highlighted operation order to reach ${config.target}.`);
+        setShareMessage('');
+        setPlayedLevels((currentLevels) => ({ ...currentLevels, [levelNum]: true }));
+        setStatusMessage(`Level ${levelNum}: reach ${config.target}. Tap a selected tile again to deselect it.`);
       };
 
       const selectNumber = (num, index) => {
@@ -230,7 +237,7 @@
         
         if (selectedOperation !== operations[currentOpIndex]) {
           setShake(true);
-          setStatusMessage(`This step needs ${operations[currentOpIndex]}, not ${selectedOperation}.`);
+          setStatusMessage('That move does not work for this round.');
           setTimeout(() => setShake(false), 500);
           return;
         }
@@ -259,7 +266,7 @@
         setSelectedNumbers([]);
         setSelectedOperation(null);
         setCurrentOpIndex(currentOpIndex + 1);
-        setStatusMessage(`Nice. ${operations.length - (currentOpIndex + 1)} step${operations.length - (currentOpIndex + 1) === 1 ? '' : 's'} left.`);
+        setStatusMessage('Move locked in.');
 
         if (newBank.length === 1) {
           const finalResult = newBank[0];
@@ -278,31 +285,78 @@
         }
       };
 
-      const resetLevel = () => {
-        if (retriesLeft <= 0) {
-          setGameState('menu');
-          return;
-        }
-
-        startLevel(level, retriesLeft - 1);
-      };
-
       const nextLevel = () => {
         if (level >= DEMO_LEVEL_COUNT) {
           setGameState('menu');
-          setStatusMessage('Thanks for testing the two-level demo.');
+          setStatusMessage('Thanks for testing the two-level build.');
           return;
         }
 
         startLevel(level + 1);
       };
 
-      const canRetry = retriesLeft > 0;
-
       const formatTime = (seconds) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+      };
+
+      const buildShareText = () => {
+        const completedCount = Object.values(playedLevels).filter(Boolean).length;
+        return `I played ${completedCount}/${DEMO_LEVEL_COUNT} Operations rounds and scored ${score} points. Play here: ${window.location.href}`;
+      };
+
+      const shareResults = async () => {
+        const text = buildShareText();
+
+        try {
+          if (navigator.share) {
+            await navigator.share({
+              title: 'Operations',
+              text,
+              url: window.location.href
+            });
+            setShareMessage('Shared!');
+            return;
+          }
+
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            setShareMessage('Results copied. Send them to a friend.');
+            return;
+          }
+        } catch (error) {
+          setShareMessage('Sharing was canceled.');
+          return;
+        }
+
+        setShareMessage('Sharing is not available on this device.');
+      };
+
+      const renderLevelCard = (levelNum) => {
+        const hasPlayed = !!playedLevels[levelNum];
+        const isUnlocked = levelNum === 1 || !!playedLevels[levelNum - 1];
+
+        return (
+          <div key={levelNum} className="bg-red-800 text-yellow-200 rounded-xl p-4 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-xl font-bold">Level {levelNum}</div>
+                <div className="text-sm">Played: {hasPlayed ? 'Yes' : 'No'}</div>
+              </div>
+              <div className={`px-3 py-1 rounded-full text-xs font-bold ${hasPlayed ? 'bg-black text-yellow-300' : 'bg-yellow-400 text-black'}`}>
+                {hasPlayed ? 'Closed' : 'Open'}
+              </div>
+            </div>
+            <button
+              onClick={() => startLevel(levelNum)}
+              disabled={!isUnlocked || hasPlayed}
+              className="w-full bg-yellow-400 text-red-900 py-3 px-4 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {!isUnlocked ? 'Locked' : hasPlayed ? 'Already Played' : 'Play Round'}
+            </button>
+          </div>
+        );
       };
 
       if (gameState === 'menu') {
@@ -322,26 +376,31 @@
                   <ul className="text-black text-left space-y-2 text-sm">
                     <li>🎯 Reach the target number</li>
                     <li>🔢 Select 2 numbers from the bank</li>
-                    <li>➕ Pick the correct operation</li>
-                    <li>🎲 Combine until one number remains</li>
+                    <li>➕ Tap an operation, then calculate</li>
+                    <li>🔁 Tap again to deselect a number or operation</li>
+                    <li>🚫 Each level can only be played once per refresh</li>
                   </ul>
                 </div>
-                
-                <button
-                  onClick={() => startLevel(1)}
-                  className="w-full bg-red-800 text-yellow-400 py-4 px-6 rounded-xl font-bold text-2xl hover:bg-red-700 transition-all transform hover:scale-105 shadow-lg"
-                >
-                  Start Game!
-                </button>
+
+                <div className="space-y-3">
+                  {[1, 2].map(renderLevelCard)}
+                </div>
                 
                 {bestScore > 0 && (
                   <div className="mt-4 text-center text-black font-bold">
                     🏆 Best Score: {bestScore}
                   </div>
                 )}
-                <div className="mt-4 text-center text-black text-sm">
-                  Demo build: 2 playable levels with 3 retries each
-                </div>
+                {statusMessage && (
+                  <div className="mt-4 text-center text-black text-sm font-semibold">
+                    {statusMessage}
+                  </div>
+                )}
+                {shareMessage && (
+                  <div className="mt-2 text-center text-black text-sm">
+                    {shareMessage}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -370,11 +429,19 @@
                 </div>
                 
                 <div className="space-y-3">
+                  {level < DEMO_LEVEL_COUNT && !playedLevels[level + 1] && (
+                    <button
+                      onClick={nextLevel}
+                      className="w-full bg-red-800 text-yellow-400 py-4 px-8 rounded-xl font-bold text-xl hover:bg-red-700 transition-all transform hover:scale-105 shadow-lg"
+                    >
+                      Next Level →
+                    </button>
+                  )}
                   <button
-                    onClick={nextLevel}
+                    onClick={shareResults}
                     className="w-full bg-red-800 text-yellow-400 py-4 px-8 rounded-xl font-bold text-xl hover:bg-red-700 transition-all transform hover:scale-105 shadow-lg"
                   >
-                    {level >= DEMO_LEVEL_COUNT ? 'Finish Demo' : 'Next Level →'}
+                    Share Your Results
                   </button>
                   <button
                     onClick={() => setGameState('menu')}
@@ -383,6 +450,9 @@
                     Main Menu
                   </button>
                 </div>
+                {shareMessage && (
+                  <div className="mt-4 text-sm font-semibold text-black">{shareMessage}</div>
+                )}
               </div>
             </div>
           </div>
@@ -405,16 +475,15 @@
                 <div className="text-black mb-6">
                   <p className="text-xl">Target: <span className="font-bold">{targetNumber}</span></p>
                   <p className="text-xl">You got: <span className="font-bold">{numberBank[0]}</span></p>
-                  <p className="text-sm mt-2">Retries left: <span className="font-bold">{retriesLeft}</span> / {MAX_RETRIES}</p>
+                  <p className="text-sm mt-2">This round is locked until refresh.</p>
                 </div>
                 
                 <div className="space-y-3">
                   <button
-                    onClick={resetLevel}
-                    disabled={!canRetry}
-                    className="w-full bg-red-800 text-yellow-400 py-4 px-8 rounded-xl font-bold text-xl hover:bg-red-700 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-800 disabled:hover:scale-100"
+                    onClick={shareResults}
+                    className="w-full bg-red-800 text-yellow-400 py-4 px-8 rounded-xl font-bold text-xl hover:bg-red-700 transition-all transform hover:scale-105 shadow-lg"
                   >
-                    {canRetry ? 'Retry Level' : 'No Retries Left'}
+                    Send To Friend
                   </button>
                   <button
                     onClick={() => setGameState('menu')}
@@ -423,6 +492,9 @@
                     Main Menu
                   </button>
                 </div>
+                {shareMessage && (
+                  <div className="mt-4 text-sm font-semibold text-black">{shareMessage}</div>
+                )}
               </div>
             </div>
           </div>
@@ -450,8 +522,8 @@
                   <div className="text-xl md:text-2xl font-bold text-black">{score}</div>
                 </div>
                 <div className="bg-yellow-400 px-3 md:px-4 py-2 rounded-lg">
-                  <div className="text-xs text-black">Retries</div>
-                  <div className="text-xl md:text-2xl font-bold text-black">{retriesLeft}</div>
+                  <div className="text-xs text-black">Played</div>
+                  <div className="text-xl md:text-2xl font-bold text-black">{playedLevels[level] ? 'Yes' : 'No'}</div>
                 </div>
               </div>
             </div>
@@ -465,7 +537,6 @@
               <div className="space-y-2 md:space-y-3 mb-3 md:mb-4">
                 {operations.map((op, idx) => {
                   const isCompleted = idx < completedSteps.length;
-                  const isCurrent = idx === currentOpIndex;
                   const stepInfo = completedSteps.find(s => s.step === idx + 1);
                   
                   return (
@@ -474,15 +545,13 @@
                       className={`py-3 md:py-4 px-4 md:px-6 text-center font-bold text-base md:text-lg rounded-lg shadow-md transition-all duration-300 ${
                         isCompleted 
                           ? 'bg-green-500 text-white transform scale-105' 
-                          : isCurrent
-                          ? 'bg-yellow-400 text-black animate-pulse'
                           : 'bg-gray-200 text-gray-600'
                       }`}
                     >
                       {isCompleted && stepInfo ? (
                         <span>{stepInfo.a} {stepInfo.op} {stepInfo.b} = {stepInfo.result} ✓</span>
                       ) : (
-                        <span>Step {idx + 1}{isCurrent ? ' - Current' : ''}</span>
+                        <span>Step {idx + 1}</span>
                       )}
                     </div>
                   );
@@ -525,7 +594,6 @@
                     <div className="space-y-1.5 md:space-y-2">
                       {['+', '-', '×', '÷'].map((op) => {
                         const isSelected = selectedOperation === op;
-                        const isRequired = operations[currentOpIndex] === op;
                         return (
                           <button
                             key={op}
@@ -533,9 +601,7 @@
                             className={`w-full py-2.5 md:py-3 text-2xl md:text-3xl font-bold rounded-lg transition-all transform ${
                               isSelected
                                 ? 'bg-yellow-400 text-black scale-105 shadow-lg ring-4 ring-yellow-300'
-                                : isRequired
-                                ? 'bg-gray-600 text-white hover:bg-gray-500 border-2 border-yellow-400 hover:scale-105'
-                                : 'bg-gray-800 text-gray-500 hover:bg-gray-700 opacity-50'
+                                : 'bg-gray-800 text-white hover:bg-gray-700 hover:scale-105'
                             } shadow-md`}
                           >
                             {op}
@@ -562,7 +628,7 @@
                 
                 {selectedNumbers.length === 0 && !selectedOperation && (
                   <div className="mt-4 text-center text-gray-600 text-xs md:text-sm">
-                    Select 2 numbers and the highlighted operation for the current step
+                    Select 2 numbers and one operation. Tap again to deselect.
                   </div>
                 )}
               </div>
