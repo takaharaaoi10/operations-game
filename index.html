@@ -302,8 +302,8 @@
       };
 
       const buildShareText = () => {
-        const completedCount = Object.values(playedLevels).filter(Boolean).length;
-        return `I played ${completedCount}/${DEMO_LEVEL_COUNT} Operations rounds and scored ${score} points. Play here: ${window.location.href}`;
+        const seconds = Math.max(1, elapsedTime);
+        return `I just played Operations in under ${seconds} seconds! Try to beat my score: https://dailytrojan-online.github.io/operations-game/`;
       };
 
       const shareResults = async () => {
